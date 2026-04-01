@@ -1,2 +1,0 @@
-# cst
-Card Strategy Task
