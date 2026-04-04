@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Multi-Armed Bandit Task</title>
+
+  <!-- ── Load ALL jsPsych scripts first, before any experiment code ── -->
+ <script src="js/jspsych.js"></script>
+<script src="js/plugin-html-keyboard-response.js"></script>
+<script src="js/plugin-survey-html-form.js"></script>
+<script src="js/plugin-pipe.js"></script>
+<link href="css/jspsych.css" rel="stylesheet" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #808080;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    .jspsych-display-element { background: transparent !important; }
+    .jspsych-content-wrapper  { width: 100% !important; max-width: none !important; }
+    .jspsych-content          { width: 100% !important; max-width: none !important; padding: 0 !important; }
+
+    #task-container {
+      position: fixed;
+      top: 50px; left: 50px; right: 50px; bottom: 50px;
+      border: 4px solid #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #hud {
+      position: absolute;
+      top: 10px; left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      padding: 0 20px;
+    }
+    #hud span { font-size: 22px; color: #000; white-space: nowrap; }
+
+    #deck-area {
+      display: flex;
+      gap: 65px;
+      align-items: flex-start;
+      margin-top: 30px;
+    }
+
+    .deck-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+
+    .card {
+      width: 180px; height: 240px;
+      border: 3px solid #fff;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: default;
+      position: relative;
+    }
+
+    .card.selected {
+      border: 6px solid #fff;
+      outline: 6px solid #fff;
+      outline-offset: 0px;
+    }
+
+    .card-label {
+      font-size: 22px;
+      font-weight: bold;
+      color: #000;
+      pointer-events: none;
+    }
+
+    .reward-box {
+      width: 120px; height: 70px;
+      background: #000;
+      border: 3px solid #fff;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 8px;
+      font-size: 22px;
+      font-weight: bold;
+      color: #fff;
+      visibility: hidden;
+    }
+
+    .deck-stats {
+      margin-top: 8px;
+      font-size: 22px;
+      color: #000;
+      text-align: center;
+    }
+
+    #instructions-bar {
+      position: absolute;
+      bottom: 20px; left: 0; right: 0;
+      text-align: center;
+      font-size: 22px;
+      color: #000;
+    }
+
+    .text-screen {
+      position: fixed;
+      top: 50px; left: 50px; right: 50px; bottom: 50px;
+      border: 4px solid #000;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 50px;
+      color: #000;
+      font-size: 22px;
+      line-height: 1.3;
+    }
+
+    .text-screen.centered {
+      align-items: center;
+      text-align: center;
+    }
+
+    #countdown-text {
+      font-size: 22px;
+      color: #ffff33;
+      font-weight: bold;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+
+<script>
+// =============================================================================
+// CONFIGURATION
+// =============================================================================
+// Daw et al. (2006): lambda=0.9836, theta=50, sigma_d=2.8, sigma_o=4, seed=42
+// Starting means: Red=85, Blue=40, Green=35, Yellow=70
+const N_ARMS            = 4;
+const N_PRACTICE_TRIALS = 10;
+const N_TRIALS          = 300;
+const N_BLOCKS          = 2;
+const TRIALS_PER_BLOCK  = N_TRIALS / N_BLOCKS;   // 150
+const REWARD_DISPLAY_MS = 1000;
+const BREAK_DURATION_MS = 120000;
+
+// Card colours: PsychoPy RGB (–1..+1) → CSS hex via v*127.5+127.5
+const CARD_COLORS = ['#e51a1a', '#1a1ae5', '#1ae51a', '#e5e51a'];
+const CARD_NAMES  = ['Deck 1', 'Deck 2', 'Deck 3', 'Deck 4'];
+
+const DATAPIPE_EXPERIMENT_ID = 'UEzfffnCy2BV';
+
+// =============================================================================
+// PRE-COMPUTED REWARD SCHEDULE
+// Generated in Python with np.random.default_rng(42) — identical to original.
+// Rows 0-9 = practice, rows 10-309 = main trials.
+// =============================================================================
+const ALL_REWARDS = [[45,46,52,47],[35,45,53,58],[33,48,56,44],[41,60,50,48],[34,54,59,41],[42,65,51,42],[43,53,49,43],[39,50,45,33],[44,53,43,40],[35,55,45,41],[77,32,38,71],[85,40,42,71],[84,30,48,73],[85,34,53,73],[81,27,43,80],[83,33,48,78],[78,31,43,76],[76,35,43,83],[88,38,37,74],[80,41,45,79],[77,41,40,79],[81,40,37,72],[77,43,43,78],[79,31,44,75],[74,34,49,71],[74,36,49,71],[71,31,36,67],[70,31,40,80],[70,34,46,74],[62,37,44,78],[62,27,56,81],[56,26,45,81],[67,33,48,85],[57,43,58,76],[64,39,47,73],[54,45,44,70],[60,42,49,75],[60,49,51,64],[58,47,51,71],[53,51,51,69],[68,47,45,74],[74,44,48,71],[67,46,49,61],[69,50,46,66],[66,52,58,66],[65,49,57,66],[74,41,54,67],[76,44,54,66],[71,54,54,72],[73,45,55,65],[82,50,48,71],[68,42,59,68],[60,48,62,75],[67,47,62,78],[72,45,59,75],[70,51,63,69],[74,51,68,85],[70,47,63,69],[66,34,61,75],[66,42,74,72],[65,41,74,76],[54,41,68,67],[60,39,67,64],[52,43,67,76],[55,32,71,74],[55,32,78,74],[67,47,73,77],[63,33,67,67],[63,32,74,79],[62,32,74,90],[58,40,71,82],[55,44,75,85],[56,45,67,70],[40,42,70,76],[45,38,82,84],[46,36,88,77],[39,44,74,76],[33,43,74,70],[42,48,75,70],[37,47,68,63],[44,55,72,61],[43,49,69,58],[36,52,66,60],[49,68,58,63],[51,60,61,53],[52,57,66,60],[44,58,57,54],[50,57,59,60],[48,46,63,77],[51,46,58,68],[46,51,64,59],[54,46,69,66],[39,51,66,62],[43,36,68,66],[53,45,68,65],[44,43,73,70],[48,35,67,60],[43,40,64,62],[40,41,65,66],[32,41,63,56],[35,48,58,59],[38,38,60,56],[42,46,50,42],[37,41,59,50],[32,53,66,56],[41,45,66,53],[37,62,70,60],[33,57,77,59],[29,57,67,50],[39,63,68,55],[38,60,65,51],[33,54,62,55],[30,63,60,42],[31,46,66,56],[23,61,70,46],[30,57,80,51],[32,58,67,46],[25,54,60,48],[25,61,57,43],[30,61,50,41],[27,65,53,37],[23,59,44,41],[24,57,46,39],[22,58,43,31],[29,62,54,26],[22,65,49,34],[28,64,51,36],[21,61,54,41],[23,42,46,30],[21,62,51,34],[28,48,47,29],[32,56,43,28],[36,46,44,37],[35,52,43,41],[44,58,40,40],[41,57,41,37],[41,50,31,38],[45,57,36,47],[38,58,33,45],[41,53,31,47],[31,55,28,47],[32,69,21,50],[32,66,26,50],[37,60,24,43],[36,66,20,54],[32,53,19,42],[37,55,20,53],[43,58,29,54],[41,60,29,48],[37,55,25,46],[33,55,29,49],[31,56,19,53],[41,41,12,46],[39,56,23,51],[35,57,14,42],[28,46,34,51],[31,45,21,32],[24,52,19,42],[32,45,28,45],[25,44,34,42],[24,43,27,43],[32,44,22,39],[28,46,31,52],[28,45,30,43],[23,45,35,51],[31,40,36,36],[24,37,38,45],[34,36,49,45],[32,38,50,54],[27,44,43,48],[33,32,31,51],[37,25,38,53],[35,24,37,50],[23,24,27,54],[32,29,28,60],[31,30,35,45],[34,30,30,55],[29,32,38,45],[33,37,37,48],[25,37,42,46],[24,43,34,55],[31,38,34,53],[36,33,34,55],[28,41,37,58],[28,46,37,52],[27,48,35,59],[23,52,39,59],[35,49,38,68],[40,50,38,61],[33,31,34,69],[33,45,45,74],[32,41,41,69],[43,40,37,72],[36,36,37,70],[51,31,35,72],[47,35,41,60],[42,35,34,61],[43,34,43,63],[53,38,32,64],[45,38,26,54],[43,29,32,60],[42,23,37,58],[40,26,28,65],[47,24,16,60],[40,25,22,61],[38,20,13,59],[46,19,12,52],[49,22,14,55],[40,16,1,55],[45,18,14,57],[43,26,14,58],[43,20,11,59],[54,16,18,59],[54,23,4,55],[45,23,11,61],[42,22,4,68],[50,18,3,60],[58,11,6,74],[53,11,8,60],[57,17,5,61],[46,16,5,66],[42,15,2,62],[42,22,3,51],[52,29,1,52],[47,28,3,56],[57,27,1,64],[52,21,1,70],[47,32,3,61],[48,28,1,64],[55,33,1,69],[41,21,1,68],[38,37,8,66],[42,31,1,65],[42,39,1,64],[41,34,1,61],[43,28,3,62],[44,39,2,54],[36,44,8,58],[39,42,9,60],[40,44,15,56],[32,37,12,51],[36,49,13,53],[39,45,18,56],[36,51,16,51],[39,54,16,42],[30,52,5,49],[29,44,12,44],[28,58,15,43],[30,52,10,46],[31,46,16,30],[31,40,10,35],[30,52,3,45],[29,44,2,27],[30,47,6,35],[32,33,6,29],[26,38,8,30],[29,45,1,33],[24,37,12,31],[18,33,15,32],[24,41,12,40],[16,44,15,28],[28,42,19,38],[26,37,15,39],[24,34,22,30],[23,39,14,36],[23,33,26,35],[33,46,28,32],[22,36,26,28],[29,28,27,21],[22,29,20,20],[28,33,25,23],[23,35,27,30],[26,23,19,35],[22,30,28,31],[28,30,29,32],[30,31,35,27],[30,35,24,35],[32,35,39,41],[29,35,26,45],[30,28,30,41],[30,34,42,39],[24,23,30,43],[36,31,24,38],[31,32,34,37],[20,31,31,33],[24,29,30,40],[27,37,31,41],[23,26,34,34],[28,32,36,34],[16,35,28,35],[22,31,22,36],[23,27,30,34],[13,35,29,40],[17,38,33,36],[21,50,29,24],[32,44,38,42],[38,37,41,40],[39,33,24,34],[47,37,44,37],[45,38,51,36],[37,42,37,43],[49,43,41,34],[61,44,38,35],[63,46,49,37],[58,44,48,35],[72,46,46,29],[58,49,37,20],[59,44,33,28],[66,39,27,35],[55,40,30,31]];
+
+// =============================================================================
+// STATE
+// =============================================================================
+let participantInfo  = {};
+let trialData        = [];
+let totalScore       = 0;
+let previousChoice   = null;
+let previousReward   = null;
+let deckChoiceCounts = [0, 0, 0, 0];
+let wsls = { win_stay:0, win_shift:0, lose_stay:0, lose_shift:0 };
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+function getTimestamp() {
+  return new Date().toISOString().replace('T', ' ').replace('Z', '');
+}
+
+function calcWSLS(selectedArm) {
+  let cat = '';
+  if (previousChoice !== null && previousReward !== null) {
+    const win    = previousReward >= 50;
+    const stayed = selectedArm === previousChoice;
+    if (win  && stayed)  { wsls.win_stay++;   cat = 'win_stay';   }
+    else if (win)        { wsls.win_shift++;  cat = 'win_shift';  }
+    else if (stayed)     { wsls.lose_stay++;  cat = 'lose_stay';  }
+    else                 { wsls.lose_shift++; cat = 'lose_shift'; }
+  }
+  return cat;
+}
+
+function buildTaskHTML({ trialLabel, remainingLabel, scoreLabel,
+                         selectedArm, reward, showRewardBox, instructionText }) {
+  const stats = deckChoiceCounts.map(c => `Chosen: ${c}x`);
+  const decks = CARD_NAMES.map((name, i) => {
+    const sel = selectedArm === i;
+    return `
+      <div class="deck-wrapper">
+        <div class="reward-box" style="visibility:${showRewardBox && sel ? 'visible' : 'hidden'}">
+          ${showRewardBox && sel && reward !== null ? '+' + reward : ''}
+        </div>
+        <div class="card${sel ? ' selected' : ''}" style="background:${CARD_COLORS[i]}">
+          <span class="card-label">${name}</span>
+        </div>
+        <div class="deck-stats">${stats[i]}</div>
+      </div>`;
+  }).join('');
+
+  const remHTML = remainingLabel
+    ? `<div style="position:absolute;top:55px;left:20px;font-size:22px;color:#000;">${remainingLabel}</div>`
+    : '';
+
+  return `
+    <div id="task-container">
+      <div id="hud">
+        <span>${trialLabel}</span>
+        <span>${scoreLabel}</span>
+      </div>
+      ${remHTML}
+      <div id="deck-area">${decks}</div>
+      <div id="instructions-bar">${instructionText}</div>
+    </div>`;
+}
+
+// =============================================================================
+// jsPsych INIT
+// =============================================================================
+const jsPsych = initJsPsych({
+  on_finish: function() {
+    document.body.innerHTML =
+      '<div style="color:#000;font-size:22px;text-align:center;margin-top:200px;">Saving your data, please wait…</div>';
+  }
+});
+
+// =============================================================================
+// TRIAL FACTORY
+// =============================================================================
+function makeTrial(overallIndex, trialType) {
+  const isPractice     = trialType === 'practice';
+  const trialNumber    = isPractice ? overallIndex + 1 : overallIndex - N_PRACTICE_TRIALS + 1;
+  const currentBlock   = isPractice ? 0 : Math.floor((overallIndex - N_PRACTICE_TRIALS) / TRIALS_PER_BLOCK) + 1;
+  const trialInBlock   = isPractice ? '' : ((overallIndex - N_PRACTICE_TRIALS) % TRIALS_PER_BLOCK) + 1;
+  const trialsRemain   = isPractice
+    ? N_PRACTICE_TRIALS - (overallIndex + 1)
+    : N_TRIALS - (overallIndex - N_PRACTICE_TRIALS + 1);
+
+  return {
+    type: jsPsychHtmlKeyboardResponse,
+    stimulus: function() {
+      const label = isPractice
+        ? `PRACTICE Trial: ${trialNumber} / ${N_PRACTICE_TRIALS}`
+        : `Trial: ${trialNumber} / ${N_TRIALS} | Block: ${currentBlock}`;
+      const score = isPractice ? `Score: ${totalScore}` : `Total Score: ${totalScore}`;
+      const rem   = isPractice ? null : `Remaining: ${trialsRemain}`;
+      return buildTaskHTML({
+        trialLabel: label, remainingLabel: rem, scoreLabel: score,
+        selectedArm: null, reward: null, showRewardBox: false,
+        instructionText: 'Press 1, 2, 3, or 4 to select a deck'
+      });
+    },
+    choices: ['1','2','3','4'],
+    response_ends_trial: false,
+    on_load: function() {
+      const startTime = performance.now();
+
+      function handleKey(e) {
+        if (!['1','2','3','4'].includes(e.key)) return;
+        document.removeEventListener('keydown', handleKey);
+
+        const rt          = performance.now() - startTime;
+        const arm         = parseInt(e.key) - 1;
+        const reward      = ALL_REWARDS[overallIndex][arm];
+
+        totalScore += reward;
+        deckChoiceCounts[arm]++;
+
+        const switched      = (previousChoice !== null && previousChoice !== arm) ? 1 : 0;
+        const wsls_category = calcWSLS(arm);
+
+        trialData.push({
+          participant:      participantInfo.participant || '',
+          session:          participantInfo.session     || '001',
+          trial_type:       trialType,
+          trial_number:     trialNumber,
+          overall_trial:    overallIndex + 1,
+          block:            currentBlock,
+          trial_in_block:   trialInBlock,
+          trials_remaining: trialsRemain,
+          selected_arm:     arm + 1,
+          reward:           reward,
+          cumulative_score: totalScore,
+          reaction_time:    (rt / 1000).toFixed(4),
+          switched:         switched,
+          wsls_category:    wsls_category,
+          timestamp:        getTimestamp()
+        });
+
+        previousChoice = arm;
+        previousReward = reward;
+
+        // Show feedback screen
+        const label = isPractice
+          ? `PRACTICE Trial: ${trialNumber} / ${N_PRACTICE_TRIALS}`
+          : `Trial: ${trialNumber} / ${N_TRIALS} | Block: ${currentBlock}`;
+        const score = isPractice ? `Score: ${totalScore}` : `Total Score: ${totalScore}`;
+        const rem   = isPractice ? null : `Remaining: ${trialsRemain}`;
+
+        const content = document.querySelector('.jspsych-content');
+        if (content) {
+          content.innerHTML = buildTaskHTML({
+            trialLabel: label, remainingLabel: rem, scoreLabel: score,
+            selectedArm: arm, reward: reward, showRewardBox: true,
+            instructionText: 'Press 1, 2, 3, or 4 to select a deck'
+          });
+        }
+
+        setTimeout(() => jsPsych.finishTrial({ response: e.key, rt }), REWARD_DISPLAY_MS);
+      }
+
+      document.addEventListener('keydown', handleKey);
+    }
+  };
+}
+
+// =============================================================================
+// BREAK SCREEN FACTORY
+// =============================================================================
+function makeBreakScreen() {
+  return {
+    type: jsPsychHtmlKeyboardResponse,
+    stimulus: function() {
+      return `
+        <div id="task-container">
+          <div class="text-screen centered" style="position:static;border:none;">
+            <div style="font-size:22px;color:#000;text-align:center;">
+              Break Time!<br><br>
+              You've completed Block 1 of ${N_BLOCKS}.<br><br>
+              Your current total score: <strong>${totalScore}</strong> points<br><br>
+              Take a break and relax.
+            </div>
+            <div id="countdown-text">Time remaining: 2:00</div>
+            <br>
+            <div style="font-size:22px;color:#000;">(Press SPACE to continue early)</div>
+          </div>
+        </div>`;
+    },
+    choices: [' '],
+    response_ends_trial: false,
+    on_load: function() {
+      const endTime = Date.now() + BREAK_DURATION_MS;
+
+      function tick() {
+        const rem  = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+        const mins = Math.floor(rem / 60);
+        const secs = rem % 60;
+        const el   = document.getElementById('countdown-text');
+        if (el) {
+          el.textContent = `Time remaining: ${mins}:${secs.toString().padStart(2,'0')}`;
+          el.style.color = rem <= 10 ? '#ff4d4d' : '#ffff33';
+        }
+        if (rem > 0) { setTimeout(tick, 100); }
+        else { showReady(); }
+      }
+
+      function showReady() {
+        document.removeEventListener('keydown', onSpace);
+        const c = document.getElementById('task-container');
+        if (c) {
+          c.innerHTML = `
+            <div style="font-size:22px;color:#000;text-align:center;">
+              Break complete!<br><br>Press <strong>SPACE</strong> to continue.
+            </div>`;
+        }
+        document.addEventListener('keydown', function onReady(e) {
+          if (e.key === ' ') {
+            document.removeEventListener('keydown', onReady);
+            jsPsych.finishTrial({});
+          }
+        });
+      }
+
+      function onSpace(e) {
+        if (e.key === ' ') { showReady(); }
+      }
+      document.addEventListener('keydown', onSpace);
+      tick();
+    }
+  };
+}
+
+// =============================================================================
+// TIMELINE
+// =============================================================================
+const timeline = [];
+
+// Participant form
+timeline.push({
+  type: jsPsychSurveyHtmlForm,
+  preamble: '<h2 style="color:#000;font-size:22px;margin-bottom:20px;">Multi-Armed Bandit Task</h2>',
+  html: `
+    <div style="color:#000;font-size:22px;line-height:2.4;">
+      <label>Participant ID:&nbsp;
+        <input name="participant" type="text" required style="font-size:22px;width:200px;" />
+      </label><br>
+      <label>Session:&nbsp;
+        <input name="session" type="text" value="001" required style="font-size:22px;width:100px;" />
+      </label>
+    </div>`,
+  button_label: 'Continue',
+  on_finish: function(data) { participantInfo = data.response; }
+});
+
+// Instructions
+timeline.push({
+  type: jsPsychHtmlKeyboardResponse,
+  stimulus: `
+    <div class="text-screen">
+      <p>Welcome to the Card Strategy Task.</p><br>
+      <p>• In this task, you will see 4 decks of cards.</p>
+      <p>• Choose a card from any deck on each trial to earn points.</p>
+      <p>• Each deck will give you different rewards.</p>
+      <p>• Your goal is to earn as many points as possible.</p><br>
+      <p><strong>How to play:</strong></p>
+      <p>• Press keys <strong>1, 2, 3, or 4</strong> to select a deck.</p>
+      <p>• You will see how many points you earned from that deck.</p>
+      <p>• Try to see which decks give you better rewards!</p><br>
+      <p><strong>Important information:</strong></p>
+      <p>• You will first complete 10 practice trials to get familiar with the task.</p>
+      <p>• Then you will complete 300 trials with a break provided in between.</p><br>
+      <p style="color:#000;">Press <strong>SPACE</strong> to begin the practice trials.</p>
+    </div>`,
+  choices: [' ']
+});
+
+// Practice trials
+for (let i = 0; i < N_PRACTICE_TRIALS; i++) {
+  timeline.push(makeTrial(i, 'practice'));
+}
+
+// Practice → main transition
+timeline.push({
+  type: jsPsychHtmlKeyboardResponse,
+  stimulus: `
+    <div class="text-screen">
+      <p>Practice Complete!</p><br>
+      <p>• You've finished the practice trials.</p>
+      <p>• Now you will begin the main task with 300 trials.</p><br>
+      <p><strong>Remember:</strong></p>
+      <p>• Try to earn as many points as possible.</p>
+      <p>• Some decks are better than others on average.</p>
+      <p>• There will be a break halfway through.</p><br>
+      <p style="color:#000;">Press <strong>SPACE</strong> when you're ready to begin.</p>
+    </div>`,
+  choices: [' '],
+  on_start: function() { totalScore = 0; }  // reset score for main task
+});
+
+// Main trials with break at midpoint
+for (let trial = 0; trial < N_TRIALS; trial++) {
+  if (trial > 0 && trial % TRIALS_PER_BLOCK === 0) {
+    timeline.push(makeBreakScreen());
+  }
+  timeline.push(makeTrial(N_PRACTICE_TRIALS + trial, 'main'));
+}
+
+// End screen
+timeline.push({
+  type: jsPsychHtmlKeyboardResponse,
+  stimulus: function() {
+    return `
+      <div class="text-screen centered">
+        <p style="font-size:22px;font-weight:bold;">Task Complete!</p><br>
+        <p style="font-size:22px;">Your final score is: <strong>${Math.round(totalScore)}</strong> points</p><br>
+        <button onclick="jsPsych.finishTrial({})"
+                style="font-size:22px;padding:12px 40px;cursor:pointer;margin-top:20px;">
+          Finish Task
+        </button>
+      </div>`;
+  },
+  choices: "NO_KEYS"   // keyboard disabled — only the button advances
+});
+
+// Save to OSF via DataPipe
+timeline.push({
+  type: jsPsychPipe,
+  action: 'save',
+  experiment_id: DATAPIPE_EXPERIMENT_ID,
+  filename: function() {
+    const pid = participantInfo.participant || 'unknown';
+    const ts  = new Date().toISOString().replace(/[:.]/g, '-');
+    return `bandit_${pid}_${ts}.csv`;
+  },
+  data_string: function() {
+    if (trialData.length === 0) return '';
+    const headers = Object.keys(trialData[0]);
+    const rows = trialData.map(row =>
+      headers.map(h => {
+        const v = row[h];
+        if (typeof v === 'string' && (v.includes(',') || v.includes('"')))
+          return `"${v.replace(/"/g, '""')}"`;
+        return v;
+      }).join(',')
+    );
+    return [headers.join(','), ...rows].join('\n');
+  }
+});
+
+// =============================================================================
+// ESC KEY — quit task at any point, save data first
+// =============================================================================
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    jsPsych.endExperiment('The experiment was ended early by pressing ESC.');
+  }
+});
+
+// =============================================================================
+// RUN
+// =============================================================================
+jsPsych.run(timeline);
+</script>
+
+</body>
+</html>
